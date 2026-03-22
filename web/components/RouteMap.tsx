@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import maplibregl from "maplibre-gl";
+import { loadClipIndex, type ClipIndex } from "@/lib/clipIndex";
+import { resolveClip, type ResolvedClip } from "@/lib/resolveClip";
+import VideoModal from "@/components/VideoModal";
 
 const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? "";
 const STYLE_URL = `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`;
@@ -26,6 +29,33 @@ const PLACEHOLDER_POIS = [
 export default function RouteMap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const indexRef = useRef<ClipIndex | null>(null);
+  const resolvingRef = useRef(false);
+  const [resolving, setResolving] = useState(false);
+  const [activeClip, setActiveClip] = useState<ResolvedClip | null>(null);
+
+  // Stable ref so the map click listener always calls the latest handler
+  // without needing to re-register after state changes.
+  const onRouteClick = useCallback(
+    async (lng: number, lat: number) => {
+      if (resolvingRef.current) return;
+      resolvingRef.current = true;
+      setResolving(true);
+      try {
+        if (!indexRef.current) {
+          indexRef.current = await loadClipIndex();
+        }
+        const clip = await resolveClip(lng, lat, indexRef.current);
+        if (clip) setActiveClip(clip);
+      } catch (e) {
+        console.error("resolveClip failed:", e);
+      } finally {
+        resolvingRef.current = false;
+        setResolving(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -41,13 +71,11 @@ export default function RouteMap() {
     map.addControl(new maplibregl.NavigationControl(), "top-right");
 
     map.on("load", () => {
-      // Add route GeoJSON source
       map.addSource(ROUTE_SOURCE, {
         type: "geojson",
         data: "/route_timeline.geojson",
       });
 
-      // Subtle shadow/glow underneath the line
       map.addLayer({
         id: `${ROUTE_LAYER}-shadow`,
         type: "line",
@@ -61,7 +89,6 @@ export default function RouteMap() {
         },
       });
 
-      // Main route line
       map.addLayer({
         id: ROUTE_LAYER,
         type: "line",
@@ -74,16 +101,17 @@ export default function RouteMap() {
         },
       });
 
-      // Highlight on hover — cursor changes to pointer when over the route
       map.on("mouseenter", ROUTE_LAYER, () => {
         map.getCanvas().style.cursor = "pointer";
       });
       map.on("mouseleave", ROUTE_LAYER, () => {
         map.getCanvas().style.cursor = "";
       });
+      map.on("click", ROUTE_LAYER, (e) => {
+        onRouteClick(e.lngLat.lng, e.lngLat.lat);
+      });
     });
 
-    // Add placeholder POI markers
     for (const poi of PLACEHOLDER_POIS) {
       const el = document.createElement("div");
       el.className =
@@ -104,7 +132,28 @@ export default function RouteMap() {
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [onRouteClick]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  return (
+    <>
+      <div ref={containerRef} className="w-full h-full" />
+
+      {/* Resolving spinner */}
+      {resolving && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full bg-black/70 text-white text-sm">
+          Loading clip…
+        </div>
+      )}
+
+      {/* Video modal */}
+      {activeClip && (
+        <VideoModal
+          src={activeClip.videoUrl}
+          seekSeconds={activeClip.seekSeconds}
+          utcTime={activeClip.utcTime}
+          onClose={() => setActiveClip(null)}
+        />
+      )}
+    </>
+  );
 }

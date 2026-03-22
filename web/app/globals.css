@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "maplibre-gl/dist/maplibre-gl.css";
+@import "plyr/dist/plyr.css";
 
 html,
 body {

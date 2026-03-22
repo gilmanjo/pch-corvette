@@ -19,3 +19,6 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Per-clip telemetry tracks (regenerable, goes to R2)
+pipeline/data/processed/tracks/
