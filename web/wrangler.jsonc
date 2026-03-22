@@ -3,5 +3,8 @@
   "compatibility_date": "2025-06-05",
   "assets": {
     "directory": "./out"
-  }
+  },
+  "routes": [
+    { "pattern": "pchcorvette.app", "custom_domain": true }
+  ]
 }
