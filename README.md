@@ -1,6 +1,6 @@
 # pch-corvette
 
-An interactive road trip journal documenting a 2022 Pacific Coast Highway drive from Astoria, OR to San Diego, CA, returning via Nevada and I-5. Built around a full-screen map where users can click anywhere along the route to stream dashcam footage from that exact moment in the drive, with starred POI markers that open photo galleries for major stops.
+An interactive road trip journal documenting a 2021 Pacific Coast Highway drive from Astoria, OR to San Diego, CA, returning via Nevada and I-5. Built around a full-screen map where users can click anywhere along the route to stream dashcam footage from that exact moment in the drive, with starred POI markers that open photo galleries for major stops.
 
 ---
 
@@ -13,7 +13,7 @@ This is a statically-hosted, media-heavy personal site. There is no traditional 
 ## Architecture Overview
 
 ```
-pch-2022/
+pch-corvette/
 ├── pipeline/        # Python scripts: GPS extraction, indexing, transcoding
 ├── web/             # Next.js app (React + TypeScript)
 │   ├── components/  # RouteMap, VideoModal, POIMarker, PhotoGallery, etc.
@@ -134,8 +134,9 @@ next, react, typescript, maplibre-gl, @turf/turf, plyr, tailwindcss, framer-moti
 
 ---
 
-## Open Questions
+## Known Facts & Open Questions
 
-- **PDR GPS format**: Need to confirm via `exiftool -ee` whether GPS is readable directly from the MP4 data stream or requires Cosworth Toolbox CSV export. This determines pipeline complexity.
-- **Timeline data completeness**: Verify Google Timeline export has continuous coverage for the trip dates. PDR GPS will fill any gaps in highway segments.
-- **Video segment gaps**: PDR auto-segmentation creates clips of ~5 min each. Need to handle edge cases where a clicked map point falls between two clips (show nearest, or stitch on the fly).
+- **PDR GPS format**: Confirmed — the PDR MP4s contain a rich binary telemetry data stream alongside video (GPS coordinates, speed, heading, g-force, brake/throttle). A fix is in progress to ensure this data stream is preserved when the source files are segmented into normalized chunks.
+- **Timeline data completeness**: Confirmed — Google Timeline export has continuous semantic segment coverage for May 29–June 13, 2021 (402 segments). `timeline_trip_excerpt.json` is the authoritative GPS source for route construction.
+- **Timestamp alignment**: PDR clips carry a UTC `creation_time` in their MP4 metadata; Timeline GPS points also carry UTC timestamps. Time-based alignment is the primary method for mapping clips to route positions.
+- **Video segment gaps**: PDR auto-segmentation creates variable-length clips (normalized to 5-min chunks). Need to handle edge cases where a clicked map point falls between two clips — show nearest clip or seek to end of prior clip.

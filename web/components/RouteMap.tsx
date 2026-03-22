@@ -1,0 +1,110 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import maplibregl from "maplibre-gl";
+
+const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? "";
+const STYLE_URL = `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`;
+
+const ROUTE_SOURCE = "route";
+const ROUTE_LAYER = "route-line";
+
+// Rough bounding box of the trip: Portland → San Diego → Reno → Portland
+const TRIP_BOUNDS: maplibregl.LngLatBoundsLike = [
+  [-124.5, 32.5], // SW: San Diego coast
+  [-114.0, 47.0], // NE: Portland area
+];
+
+// Placeholder POIs — will be replaced by pois.json from the pipeline
+const PLACEHOLDER_POIS = [
+  { name: "Astoria, OR", lng: -123.831, lat: 46.188 },
+  { name: "Big Sur, CA", lng: -121.808, lat: 36.27 },
+  { name: "Death Valley", lng: -116.866, lat: 36.505 },
+  { name: "Crater Lake", lng: -122.109, lat: 42.944 },
+];
+
+export default function RouteMap() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: STYLE_URL,
+      bounds: TRIP_BOUNDS,
+      fitBoundsOptions: { padding: 40 },
+    });
+    mapRef.current = map;
+
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+    map.on("load", () => {
+      // Add route GeoJSON source
+      map.addSource(ROUTE_SOURCE, {
+        type: "geojson",
+        data: "/route_timeline.geojson",
+      });
+
+      // Subtle shadow/glow underneath the line
+      map.addLayer({
+        id: `${ROUTE_LAYER}-shadow`,
+        type: "line",
+        source: ROUTE_SOURCE,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": "#000000",
+          "line-width": 8,
+          "line-opacity": 0.15,
+          "line-blur": 4,
+        },
+      });
+
+      // Main route line
+      map.addLayer({
+        id: ROUTE_LAYER,
+        type: "line",
+        source: ROUTE_SOURCE,
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: {
+          "line-color": "#e85d04",
+          "line-width": 3,
+          "line-opacity": 0.9,
+        },
+      });
+
+      // Highlight on hover — cursor changes to pointer when over the route
+      map.on("mouseenter", ROUTE_LAYER, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", ROUTE_LAYER, () => {
+        map.getCanvas().style.cursor = "";
+      });
+    });
+
+    // Add placeholder POI markers
+    for (const poi of PLACEHOLDER_POIS) {
+      const el = document.createElement("div");
+      el.className =
+        "w-4 h-4 rounded-full bg-yellow-400 border-2 border-white shadow-md cursor-pointer";
+      el.title = poi.name;
+
+      new maplibregl.Marker({ element: el })
+        .setLngLat([poi.lng, poi.lat])
+        .setPopup(
+          new maplibregl.Popup({ offset: 12 }).setHTML(
+            `<span class="text-sm font-medium">${poi.name}</span>`
+          )
+        )
+        .addTo(map);
+    }
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  return <div ref={containerRef} className="w-full h-full" />;
+}

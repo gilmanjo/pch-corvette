@@ -1,0 +1,21 @@
+# Source media — stored in R2, NOT in git
+pipeline/data/raw/
+
+# Pipeline outputs that get uploaded to R2 (regenerable)
+pipeline/data/processed/video/
+
+# Node
+web/node_modules/
+web/.next/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Env / secrets
+.env
+.env.local
+
+# OS
+.DS_Store
