@@ -117,9 +117,9 @@ export async function resolveClip(
     })
   );
 
-  // Reject if the nearest GPS point is > 1 km from the click
-  // (prevents spurious matches on non-driving map clicks)
-  if (bestDistKm > 1) return null;
+  // Reject if the nearest GPS point is > 2 km from the click.
+  // 2 km (vs 1 km) accounts for drift between Timeline route and PDR GPS.
+  if (bestDistKm > 2) return null;
 
   return best;
 }

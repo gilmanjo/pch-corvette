@@ -69,6 +69,7 @@ def split_clip(src_path: str, creation_time: datetime, duration_s: float) -> Non
         subprocess.run(
             [
                 "ffmpeg",
+                "-y",                   # overwrite output without prompting
                 "-loglevel", "error",
                 "-ss", str(seek_offset),
                 "-i", src_path,
