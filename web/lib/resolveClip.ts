@@ -41,7 +41,7 @@ async function fetchTrack(trackPath: string): Promise<TrackFile> {
 /** Convert clip filename to video URL. */
 function videoUrl(file: string): string {
   const mp4 = file.replace(".mov", ".mp4");
-  return `${MEDIA_BASE}/video/web/${mp4}`;
+  return `${MEDIA_BASE}/video/${mp4}`;
 }
 
 /** Derive UTC time string from clip start + seek offset. */
