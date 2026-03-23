@@ -2,10 +2,18 @@ import { nearestPoint } from "@turf/nearest-point";
 import { point, featureCollection } from "@turf/helpers";
 import type { ClipEntry, ClipIndex } from "./clipIndex";
 
-// Base URL for track files and video.
-// In dev: empty string → served from web/public/.
-// In prod: set NEXT_PUBLIC_MEDIA_BASE_URL to the R2 public bucket URL.
-const MEDIA_BASE = process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? "";
+// R2 base URL for video files only.
+// Track files are always served from the same origin (/tracks/),
+// since they're included in the static build via web/public/tracks/.
+const VIDEO_BASE = process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? "";
+
+export interface TelemetryData {
+  speed_mph: number | null;
+  heading: number | null;
+  lat: number | null;
+  lng: number | null;
+  altitude_m: number | null;
+}
 
 export interface ResolvedClip {
   /** Original .mov filename, e.g. "pdr_20210529_085856Z.mov" */
@@ -16,21 +24,26 @@ export interface ResolvedClip {
   seekSeconds: number;
   /** UTC timestamp string at this point in the trip */
   utcTime: string;
+  /** Telemetry at the resolved point */
+  telemetry: TelemetryData;
 }
 
 // GPS point as stored in the track file: [t, lat, lng, alt_m, hdg_deg]
-type GpsPoint = [number, number, number, number, number];
+type GpsPoint = [number, number, number, ...number[]];
 
 interface TrackFile {
   duration: number;
   gps: GpsPoint[];
+  telemetry?: {
+    speed?: [number, number][]; // [t, raw_speed], raw_speed / 100 = km/h
+  };
 }
 
 const trackCache = new Map<string, TrackFile>();
 
 async function fetchTrack(trackPath: string): Promise<TrackFile> {
   if (trackCache.has(trackPath)) return trackCache.get(trackPath)!;
-  const url = `${MEDIA_BASE}/${trackPath}`;
+  const url = `/${trackPath}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Track fetch failed: ${res.status} ${url}`);
   const data = (await res.json()) as TrackFile;
@@ -41,13 +54,28 @@ async function fetchTrack(trackPath: string): Promise<TrackFile> {
 /** Convert clip filename to video URL. */
 function videoUrl(file: string): string {
   const mp4 = file.replace(".mov", ".mp4");
-  return `${MEDIA_BASE}/video/${mp4}`;
+  return `${VIDEO_BASE}/video/${mp4}`;
 }
 
 /** Derive UTC time string from clip start + seek offset. */
 function utcAtSeek(tStart: string, seekSeconds: number): string {
   const ms = new Date(tStart).getTime() + seekSeconds * 1000;
   return new Date(ms).toISOString();
+}
+
+/** Find speed in mph nearest to time t, within 2s tolerance. */
+function nearestSpeed(
+  records: [number, number][] | undefined,
+  t: number
+): number | null {
+  if (!records?.length) return null;
+  let best = records[0];
+  for (const r of records) {
+    if (Math.abs(r[0] - t) < Math.abs(best[0] - t)) best = r;
+  }
+  if (Math.abs(best[0] - t) > 2) return null;
+  const kmh = best[1] / 100;
+  return Math.round(kmh * 0.621371 * 10) / 10;
 }
 
 /** Bbox pre-filter with a small padding for edge clicks. */
@@ -107,11 +135,22 @@ export async function resolveClip(
       if (distKm < bestDistKm) {
         bestDistKm = distKm;
         const seekSeconds = nearest.properties.t as number;
+        // Find the matching GPS point for telemetry
+        const ptIdx = track.gps.findIndex((p) => p[0] === seekSeconds);
+        const pt = ptIdx >= 0 ? track.gps[ptIdx] : null;
+
         best = {
           file: chunk.file,
           videoUrl: videoUrl(chunk.file),
           seekSeconds,
           utcTime: utcAtSeek(chunk.t_start, seekSeconds),
+          telemetry: {
+            lat: pt ? pt[1] : null,
+            lng: pt ? pt[2] : null,
+            altitude_m: pt && pt.length > 3 ? pt[3] : null,
+            heading: pt && pt.length > 4 ? pt[4] : null,
+            speed_mph: nearestSpeed(track.telemetry?.speed, seekSeconds),
+          },
         };
       }
     })

@@ -245,6 +245,7 @@ export default function RouteMap() {
           src={activeClip.videoUrl}
           seekSeconds={activeClip.seekSeconds}
           utcTime={activeClip.utcTime}
+          telemetry={activeClip.telemetry}
           onClose={() => setActiveClip(null)}
         />
       )}
