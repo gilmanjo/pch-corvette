@@ -293,9 +293,13 @@ export default function VideoModal({
     playerRef.current = player;
 
     // Seek on ready; also try after metadata loads for remote videos
-    const seekTo = () => { player.currentTime = seekSeconds; void player.play(); };
+    let hasSought = false;
+    const seekTo = () => {
+      player.currentTime = seekSeconds;
+      hasSought = true;
+    };
     player.on("ready", seekTo);
-    player.on("loadedmetadata", seekTo);
+    player.on("loadedmetadata", () => { if (!hasSought) seekTo(); });
     player.on("timeupdate", handleTimeUpdate);
 
     return () => {
