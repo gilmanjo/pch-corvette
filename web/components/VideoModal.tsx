@@ -16,6 +16,7 @@ export interface VideoModalProps {
   telemetry: TelemetryData;
   track: TrackFile;
   onClose: () => void;
+  onEnded?: () => void;
   onPositionUpdate?: (lat: number, lng: number) => void;
 }
 
@@ -42,6 +43,63 @@ const C = "#22d3ee";       // cyan accent
 const DIM = "#334155";     // dim/null color
 const LABEL = "#3a4a5a";   // label color
 
+// ── Animated value (slot-machine turnover) ────────────────────────────────────
+
+const ANIM_CSS = `
+@keyframes numEnterTop    { from { transform:translateY(-70%); opacity:0 } to { transform:translateY(0); opacity:1 } }
+@keyframes numEnterBottom { from { transform:translateY(70%);  opacity:0 } to { transform:translateY(0); opacity:1 } }
+@keyframes numExitDown    { from { transform:translateY(0);    opacity:1 } to { transform:translateY(70%);  opacity:0 } }
+@keyframes numExitUp      { from { transform:translateY(0);    opacity:1 } to { transform:translateY(-70%); opacity:0 } }
+`;
+
+function AnimatedValue({
+  value,
+  format = String,
+  style = {},
+}: {
+  value: number | null;
+  format?: (v: number) => string;
+  style?: React.CSSProperties;
+}) {
+  const [state, setState] = useState<{
+    cur: number | null;
+    ghost: number | null;
+    key: number;
+    dir: 1 | -1;
+  }>({ cur: value, ghost: null, key: 0, dir: 1 });
+
+  useEffect(() => {
+    setState((s) => {
+      if (value === s.cur) return s;
+      return {
+        cur: value,
+        ghost: s.cur,
+        key: s.key + 1,
+        dir: (value ?? 0) >= (s.cur ?? 0) ? 1 : -1,
+      };
+    });
+  }, [value]);
+
+  const BOUNCE = "cubic-bezier(0.34,1.56,0.64,1)";
+  const enterAnim = `${state.dir === 1 ? "numEnterTop" : "numEnterBottom"} 0.4s ${BOUNCE} forwards`;
+  const exitAnim  = `${state.dir === 1 ? "numExitDown" : "numExitUp"} 0.18s ease-in forwards`;
+  const text      = state.cur !== null ? format(state.cur) : "—";
+  const ghostText = state.ghost !== null ? format(state.ghost) : "—";
+
+  return (
+    <span style={{ display: "inline-block", position: "relative", overflow: "hidden", ...style }}>
+      {state.ghost !== null && (
+        <span key={`g${state.key}`} style={{ position: "absolute", inset: 0, animation: exitAnim, whiteSpace: "nowrap" }}>
+          {ghostText}
+        </span>
+      )}
+      <span key={state.key} style={{ display: "block", animation: state.key > 0 ? enterAnim : undefined, whiteSpace: "nowrap" }}>
+        {text}
+      </span>
+    </span>
+  );
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function SpeedGauge({ mph }: { mph: number | null }) {
@@ -66,10 +124,11 @@ function SpeedGauge({ mph }: { mph: number | null }) {
         )}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className="text-4xl font-mono font-bold leading-none"
-          style={{ color: mph !== null ? C : DIM, textShadow: mph !== null ? `0 0 12px rgba(34,211,238,0.4)` : "none" }}>
-          {mph !== null ? Math.round(mph) : "—"}
-        </span>
+        <AnimatedValue
+          value={mph !== null ? Math.round(mph) : null}
+          style={{ color: mph !== null ? C : DIM, fontSize: "2.25rem", fontWeight: 700, lineHeight: 1, fontFamily: "monospace",
+            textShadow: mph !== null ? "0 0 12px rgba(34,211,238,0.4)" : "none", minWidth: "3ch", textAlign: "center" }}
+        />
         <span className="text-[9px] font-mono tracking-[0.25em] mt-1" style={{ color: LABEL }}>MPH</span>
       </div>
     </div>
@@ -169,8 +228,10 @@ function GForceDot({ gLat, gLon }: { gLat: number | null; gLon: number | null })
   );
 }
 
-function PedalBars({ throttle, brake }: { throttle: number | null; brake: number | null }) {
-  const Bar = ({ value, color, label }: { value: number | null; color: string; label: string }) => (
+// Must be defined at module scope — if defined inside PedalBars, React treats
+// it as a new component type on each render and remounts it, killing CSS transitions.
+function PedalBar({ value, color, label }: { value: number | null; color: string; label: string }) {
+  return (
     <div>
       <div className="flex justify-between font-mono text-[9px] mb-1">
         <span style={{ color: LABEL }}>{label}</span>
@@ -179,17 +240,19 @@ function PedalBars({ throttle, brake }: { throttle: number | null; brake: number
       <div className="h-2 rounded-full" style={{ background: "#1a2535" }}>
         <div className="h-2 rounded-full"
           style={{ width: `${Math.min(value ?? 0, 100)}%`, background: color,
-            transition: "width 0.3s ease-out",
+            transition: "width 0.25s linear",
             boxShadow: (value ?? 0) > 5 ? `0 0 6px ${color}88` : "none" }} />
       </div>
     </div>
   );
+}
 
+function PedalBars({ throttle, brake }: { throttle: number | null; brake: number | null }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="text-[9px] tracking-[0.2em] font-mono" style={{ color: LABEL }}>INPUTS</div>
-      <Bar value={throttle} color="#22c55e" label="THROTTLE" />
-      <Bar value={brake} color="#ef4444" label="BRAKE" />
+      <PedalBar value={throttle} color="#22c55e" label="THROTTLE" />
+      <PedalBar value={brake} color="#ef4444" label="BRAKE" />
     </div>
   );
 }
@@ -234,7 +297,7 @@ function TyreGrid({ tel }: { tel: TelemetryData }) {
 
   return (
     <div>
-      <div className="text-[9px] tracking-[0.2em] mb-2 font-mono" style={{ color: LABEL }}>TYRES</div>
+      <div className="text-[9px] tracking-[0.2em] mb-2 font-mono" style={{ color: LABEL }}>TIRES</div>
       <div className="grid grid-cols-2 gap-1.5">
         {corners.map(({ label, press, temp }) => (
           <div key={label} className="rounded p-1.5 font-mono" style={{ background: "#0d1620" }}>
@@ -257,7 +320,7 @@ function TyreGrid({ tel }: { tel: TelemetryData }) {
 
 export default function VideoModal({
   src, seekSeconds, utcTime, telemetry: initialTelemetry, track,
-  onClose, onPositionUpdate,
+  onClose, onEnded, onPositionUpdate,
 }: VideoModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<Plyr | null>(null);
@@ -306,13 +369,16 @@ export default function VideoModal({
     };
     // Stable wrapper calls the ref — Plyr effect deps don't include the callback
     const onTimeUpdate = () => handleTimeUpdateRef.current();
+    const onEndedCb = () => onEnded?.();
     player.on("ready", seekTo);
     player.on("loadedmetadata", () => { if (!hasSought) seekTo(); });
     player.on("timeupdate", onTimeUpdate);
+    player.on("ended", onEndedCb);
 
     return () => {
       player.off("ready", seekTo);
       player.off("timeupdate", onTimeUpdate);
+      player.off("ended", onEndedCb);
       player.destroy();
       playerRef.current = null;
     };
@@ -368,26 +434,55 @@ export default function VideoModal({
         </div>
 
         {/* ── Telemetry panel ── */}
-        <style>{`@media (min-width: 768px) { .tel-panel { width: 256px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }`}</style>
+        <style>{`
+          @media (min-width: 768px) { .tel-panel { width: 256px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }
+          ${ANIM_CSS}
+        `}</style>
         <div className="tel-panel font-mono" style={{ background: "#080c10", borderTop: "1px solid rgba(34,211,238,0.1)" }}>
           <div className="flex flex-col gap-4 p-4">
+
+            {/* Timestamp + Position — top of panel */}
+            <div>
+              <div className="text-[9px] tracking-[0.2em] mb-1" style={{ color: LABEL }}>TIMESTAMP</div>
+              <div className="text-[11px] leading-relaxed" style={{ color: "#4a7a8a" }}>{formattedTime}</div>
+            </div>
+            <div>
+              <div className="text-[9px] tracking-[0.2em] mb-2" style={{ color: LABEL }}>POSITION</div>
+              <div className="text-sm leading-relaxed" style={{ color: C }}>
+                {telemetry.lat != null ? <>{Math.abs(telemetry.lat).toFixed(4)}°&nbsp;{latDir}</> : <span style={{ color: DIM }}>—</span>}
+              </div>
+              <div className="text-sm leading-relaxed" style={{ color: C }}>
+                {lngAbs != null ? <>{lngAbs.toFixed(4)}°&nbsp;{lngDir}</> : <span style={{ color: DIM }}>—</span>}
+              </div>
+              <div className="flex items-baseline gap-1.5 mt-2">
+                <div className="text-[9px] tracking-[0.2em]" style={{ color: LABEL }}>ELEV</div>
+                <span className="text-sm font-bold" style={{ color: altFt != null ? C : DIM }}>
+                  {altFt != null ? `${altFt.toLocaleString()} ft` : "—"}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
 
             {/* Speed + Gear */}
             <div className="flex items-center gap-4">
               <SpeedGauge mph={telemetry.speed_mph} />
               <div className="flex flex-col items-center">
                 <div className="text-[9px] tracking-[0.2em]" style={{ color: LABEL }}>GEAR</div>
-                <div className="text-5xl font-bold leading-none mt-1"
-                  style={{ color: telemetry.gear !== null ? C : DIM,
-                    textShadow: telemetry.gear !== null ? "0 0 15px rgba(34,211,238,0.5)" : "none" }}>
-                  {gearLabel(telemetry.gear)}
-                </div>
+                <AnimatedValue
+                  value={telemetry.gear}
+                  format={gearLabel as (v: number) => string}
+                  style={{ fontSize: "3rem", fontWeight: 700, lineHeight: 1, marginTop: 4,
+                    color: telemetry.gear !== null ? C : DIM, fontFamily: "monospace",
+                    textShadow: telemetry.gear !== null ? "0 0 15px rgba(34,211,238,0.5)" : "none",
+                    minWidth: "1.5ch", textAlign: "center" }}
+                />
               </div>
             </div>
 
             <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
 
-            {/* G-force + Heading side by side on mobile, stacked on panel */}
+            {/* G-force */}
             <GForceDot gLat={telemetry.g_lat} gLon={telemetry.g_lon} />
 
             <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
@@ -432,39 +527,8 @@ export default function VideoModal({
 
             <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
 
-            {/* Tyres */}
+            {/* Tires */}
             <TyreGrid tel={telemetry} />
-
-            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
-
-            {/* Position + Elevation */}
-            <div>
-              <div className="text-[9px] tracking-[0.2em] mb-2" style={{ color: LABEL }}>POSITION</div>
-              <div className="text-sm leading-relaxed" style={{ color: C }}>
-                {telemetry.lat != null
-                  ? <>{Math.abs(telemetry.lat).toFixed(4)}°&nbsp;{latDir}</>
-                  : <span style={{ color: DIM }}>—</span>}
-              </div>
-              <div className="text-sm leading-relaxed" style={{ color: C }}>
-                {lngAbs != null
-                  ? <>{lngAbs.toFixed(4)}°&nbsp;{lngDir}</>
-                  : <span style={{ color: DIM }}>—</span>}
-              </div>
-              <div className="flex items-baseline gap-1.5 mt-2">
-                <div className="text-[9px] tracking-[0.2em]" style={{ color: LABEL }}>ELEV</div>
-                <span className="text-sm font-bold" style={{ color: altFt != null ? C : DIM }}>
-                  {altFt != null ? `${altFt.toLocaleString()} ft` : "—"}
-                </span>
-              </div>
-            </div>
-
-            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
-
-            {/* Timestamp */}
-            <div>
-              <div className="text-[9px] tracking-[0.2em] mb-1" style={{ color: LABEL }}>TIMESTAMP</div>
-              <div className="text-[11px] leading-relaxed" style={{ color: "#4a7a8a" }}>{formattedTime}</div>
-            </div>
           </div>
         </div>
       </div>

@@ -261,3 +261,42 @@ export async function resolveClip(
   if (bestDistKm > 2) return null;
   return best;
 }
+
+/** Resolve the next clip in chronological order after currentFile. */
+export async function resolveNextClip(
+  currentFile: string,
+  index: ClipIndex
+): Promise<ResolvedClip | null> {
+  const sorted = [...index.chunks].sort(
+    (a, b) => new Date(a.t_start).getTime() - new Date(b.t_start).getTime()
+  );
+  const idx = sorted.findIndex((c) => c.file === currentFile);
+  if (idx === -1 || idx >= sorted.length - 1) return null;
+
+  const next = sorted[idx + 1];
+  let track: TrackFile;
+  try {
+    track = await fetchTrack(next.track);
+  } catch {
+    return null;
+  }
+
+  const seekSeconds = 0;
+  const telemetry = extractTelemetry(track, seekSeconds);
+  const gps = nearestGps(track, seekSeconds);
+  if (gps) {
+    telemetry.lat = gps.lat;
+    telemetry.lng = gps.lng;
+    telemetry.altitude_m = gps.alt;
+    telemetry.heading = gps.heading;
+  }
+
+  return {
+    file: next.file,
+    videoUrl: videoUrl(next.file),
+    seekSeconds,
+    utcTime: next.t_start,
+    telemetry,
+    track,
+  };
+}

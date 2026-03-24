@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import { loadClipIndex, type ClipIndex } from "@/lib/clipIndex";
-import { resolveClip, type ResolvedClip } from "@/lib/resolveClip";
+import { resolveClip, resolveNextClip, type ResolvedClip } from "@/lib/resolveClip";
 import VideoModal from "@/components/VideoModal";
 
 const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? "";
@@ -43,6 +43,7 @@ export default function RouteMap() {
   const indexRef = useRef<ClipIndex | null>(null);
   const resolvingRef = useRef(false);
   const carMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const activeClipRef = useRef<ResolvedClip | null>(null);
   const [resolving, setResolving] = useState(false);
   const [noClip, setNoClip] = useState(false);
   const [activeClip, setActiveClip] = useState<ResolvedClip | null>(null);
@@ -212,6 +213,9 @@ export default function RouteMap() {
 
   // Stable callbacks — must not change on tooltip hover re-renders or Plyr
   // will destroy and recreate the player every time the map tooltip moves.
+  // Keep ref in sync so onClipEnded can read current clip without being a dep
+  activeClipRef.current = activeClip;
+
   const onPositionUpdate = useCallback((lat: number, lng: number) => {
     if (!mapRef.current) return;
     if (!carMarkerRef.current) {
@@ -231,6 +235,34 @@ export default function RouteMap() {
     carMarkerRef.current = null;
     setActiveClip(null);
   }, []);
+
+  const onClipEnded = useCallback(async () => {
+    if (!activeClipRef.current || !indexRef.current) return;
+    const next = await resolveNextClip(activeClipRef.current.file, indexRef.current);
+    if (next) {
+      carMarkerRef.current?.remove();
+      carMarkerRef.current = null;
+      setActiveClip(next);
+    }
+  }, []);
+
+  // Create/update the car marker immediately when a clip is activated,
+  // so it appears even before the user presses play.
+  useEffect(() => {
+    if (!activeClip || !mapRef.current) return;
+    const { lat, lng } = activeClip.telemetry;
+    if (lat == null || lng == null) return;
+    if (!carMarkerRef.current) {
+      const el = document.createElement("div");
+      el.style.cssText =
+        "width:24px;height:24px;background:#e85d04;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px rgba(232,93,4,0.8);";
+      carMarkerRef.current = new maplibregl.Marker({ element: el })
+        .setLngLat([lng, lat])
+        .addTo(mapRef.current);
+    } else {
+      carMarkerRef.current.setLngLat([lng, lat]);
+    }
+  }, [activeClip]);
 
   const formattedTooltipTime = tooltip
     ? new Date(tooltip.utc).toLocaleString("en-US", {
@@ -278,6 +310,7 @@ export default function RouteMap() {
           telemetry={activeClip.telemetry}
           track={activeClip.track}
           onPositionUpdate={onPositionUpdate}
+          onEnded={onClipEnded}
           onClose={onModalClose}
         />
       )}
