@@ -343,16 +343,10 @@ export default function VideoModal({
         </div>
 
         {/* ── Telemetry panel ── */}
-        <div
-          className="flex-shrink-0 overflow-y-auto font-mono"
-          style={{
-            width: "100%", // overridden by md:w-72 below
-            background: "#080c10",
-            borderTop: "1px solid rgba(34,211,238,0.1)",
-          }}>
-          {/* md: fixed width sidebar; mobile: full-width strip */}
-          <style>{`@media (min-width: 768px) { .tel-panel { width: 256px; border-top: none; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }`}</style>
-          <div className="tel-panel flex flex-col gap-4 p-4">
+        {/* tel-panel controls width: full on mobile, 256px sidebar on md+ */}
+        <style>{`.tel-panel { width: 100%; border-top: 1px solid rgba(34,211,238,0.1); overflow-y: auto; flex-shrink: 0; } @media (min-width: 768px) { .tel-panel { width: 256px; border-top: none; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }`}</style>
+        <div className="tel-panel font-mono" style={{ background: "#080c10" }}>
+          <div className="flex flex-col gap-4 p-4">
 
             {/* Speed + Gear */}
             <div className="flex items-center gap-4">
