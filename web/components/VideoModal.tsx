@@ -62,7 +62,7 @@ function SpeedGauge({ mph }: { mph: number | null }) {
           <circle cx={cx} cy={cy} r={r} fill="none" stroke={C} strokeWidth="9"
             strokeDasharray={`${filled} ${circ - filled}`} strokeLinecap="round"
             transform={`rotate(135 ${cx} ${cy})`}
-            style={{ filter: "drop-shadow(0 0 5px rgba(34,211,238,0.5))", transition: "stroke-dasharray 0.3s ease" }} />
+            style={{ filter: "drop-shadow(0 0 5px rgba(34,211,238,0.5))", transition: "stroke-dasharray 0.35s ease-out" }} />
         )}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
@@ -106,7 +106,7 @@ function Compass({ heading }: { heading: number | null }) {
             x2={36 + 32 * Math.cos(rad)} y2={36 + 32 * Math.sin(rad)}
             stroke="#1e2d3d" strokeWidth="1" />;
         })}
-        <g style={{ transform: `rotate(${h}deg)`, transformOrigin: "36px 36px", transition: "transform 0.3s ease" }} opacity={hasFix ? 1 : 0.2}>
+        <g style={{ transform: `rotate(${h}deg)`, transformOrigin: "36px 36px", transition: "transform 0.35s ease-out" }} opacity={hasFix ? 1 : 0.2}>
           <polygon points="36,7 33.5,36 36,32 38.5,36" fill={C}
             style={{ filter: "drop-shadow(0 0 3px rgba(34,211,238,0.8))" }} />
           <polygon points="36,65 33.5,36 36,40 38.5,36" fill="#334155" />
@@ -156,7 +156,7 @@ function GForceDot({ gLat, gLon }: { gLat: number | null; gLon: number | null })
           <circle cx="0" cy="0" r="4" fill={hasFix ? dotColor : "transparent"}
             style={{
               transform: `translate(${dx}px, ${dy}px)`,
-              transition: "transform 0.2s ease, fill 0.2s ease",
+              transition: "transform 0.25s ease-out, fill 0.25s ease-out",
               filter: hasFix ? `drop-shadow(0 0 4px ${dotColor})` : "none",
             }} />
         </svg>
@@ -177,8 +177,9 @@ function PedalBars({ throttle, brake }: { throttle: number | null; brake: number
         <span style={{ color: value !== null ? color : DIM }}>{value !== null ? `${Math.round(value)}%` : "—"}</span>
       </div>
       <div className="h-2 rounded-full" style={{ background: "#1a2535" }}>
-        <div className="h-2 rounded-full transition-all duration-200"
+        <div className="h-2 rounded-full"
           style={{ width: `${Math.min(value ?? 0, 100)}%`, background: color,
+            transition: "width 0.3s ease-out",
             boxShadow: (value ?? 0) > 5 ? `0 0 6px ${color}88` : "none" }} />
       </div>
     </div>
@@ -209,8 +210,9 @@ function RPMBar({ rpm }: { rpm: number | null }) {
         </span>
       </div>
       <div className="h-1.5 rounded-full" style={{ background: "#1a2535" }}>
-        <div className="h-1.5 rounded-full transition-all duration-200"
+        <div className="h-1.5 rounded-full"
           style={{ width: `${pct}%`, background: barColor,
+            transition: "width 0.3s ease-out",
             boxShadow: inRedZone ? `0 0 6px #ef444488` : "none" }} />
       </div>
       <div className="flex justify-between font-mono text-[8px] mt-0.5">
@@ -344,13 +346,25 @@ export default function VideoModal({
         onClick={(e) => e.stopPropagation()}>
 
         {/* ── Video panel ── */}
-        <div className="flex-shrink-0 md:flex-1 min-w-0 bg-black flex flex-col">
-          <div className="flex items-center justify-end px-3 py-1.5 bg-zinc-950">
-            <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors text-lg leading-none" aria-label="Close">✕</button>
-          </div>
-          <video ref={videoRef} className="w-full" playsInline>
+        <div className="flex-shrink-0 md:flex-1 min-w-0 bg-black relative">
+          <video ref={videoRef} className="w-full block" playsInline>
             <source src={src} type="video/mp4" />
           </video>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              position: "absolute", top: 10, right: 10, zIndex: 10,
+              width: 28, height: 28, borderRadius: 4,
+              background: "rgba(8,12,16,0.8)",
+              border: "1px solid rgba(34,211,238,0.35)",
+              color: "#22d3ee", fontSize: 14, lineHeight: 1,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "background 0.15s, border-color 0.15s",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(34,211,238,0.15)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(8,12,16,0.8)"; }}
+          >✕</button>
         </div>
 
         {/* ── Telemetry panel ── */}

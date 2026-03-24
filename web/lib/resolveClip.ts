@@ -145,10 +145,8 @@ function inBbox(
 export function extractTelemetry(track: TrackFile, t: number): TelemetryData {
   const tel = track.telemetry ?? {};
   const rawSpeed = nearestVal(tel.speed, t, 5);
-  const speedMph =
-    rawSpeed !== null
-      ? Math.round((rawSpeed / 100) * 0.621371 * 10) / 10
-      : null;
+  // Raw speed is in hundredths of mph (not km/h), so divide by 100 only.
+  const speedMph = rawSpeed !== null ? Math.round(rawSpeed / 10) / 10 : null;
 
   const rawGear = nearestVal(tel.gear, t, 10);
   const gear = rawGear !== null && rawGear >= 0 && rawGear <= 9 ? rawGear : null;
@@ -173,10 +171,10 @@ export function extractTelemetry(track: TrackFile, t: number): TelemetryData {
     oil_temp_c: nearestVal(tel.oil_temp, t, 10),
     oil_pressure: nearestVal(tel.oil_pressure, t, 10),
     coolant_temp_c: nearestVal(tel.coolant_temp, t, 10),
-    tyre_press_lf: nearestVal(tel.tyre_pressure_lf, t, 10),
-    tyre_press_rf: nearestVal(tel.tyre_pressure_rf, t, 10),
-    tyre_press_lr: nearestVal(tel.tyre_pressure_lr, t, 10),
-    tyre_press_rr: nearestVal(tel.tyre_pressure_rr, t, 10),
+    tyre_press_lf: nearestVal(tel.tyre_pressure_lf, t, 10, 0.5),
+    tyre_press_rf: nearestVal(tel.tyre_pressure_rf, t, 10, 0.5),
+    tyre_press_lr: nearestVal(tel.tyre_pressure_lr, t, 10, 0.5),
+    tyre_press_rr: nearestVal(tel.tyre_pressure_rr, t, 10, 0.5),
     tyre_temp_lf: nearestVal(tel.tyre_temp_lf, t, 10),
     tyre_temp_rf: nearestVal(tel.tyre_temp_rf, t, 10),
     tyre_temp_lr: nearestVal(tel.tyre_temp_lr, t, 10),
