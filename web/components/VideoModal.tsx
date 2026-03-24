@@ -1,141 +1,249 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Plyr from "plyr";
-import type { TelemetryData } from "@/lib/resolveClip";
+import {
+  type TelemetryData,
+  type TrackFile,
+  extractTelemetry,
+  nearestGps,
+} from "@/lib/resolveClip";
 
 export interface VideoModalProps {
   src: string;
   seekSeconds: number;
   utcTime: string;
   telemetry: TelemetryData;
+  track: TrackFile;
   onClose: () => void;
+  onPositionUpdate?: (lat: number, lng: number) => void;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function headingToCardinal(deg: number): string {
   const dirs = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
   return dirs[Math.round(deg / 22.5) % 16];
 }
 
-// ── Speed Gauge ───────────────────────────────────────────────────────────────
+function gearLabel(g: number | null): string {
+  if (g === null) return "—";
+  if (g === 0) return "N";
+  if (g === 9) return "R";
+  if (g >= 1 && g <= 8) return String(g);
+  return "—";
+}
+
+function fmt1(v: number | null): string {
+  return v !== null ? v.toFixed(1) : "—";
+}
+
+const C = "#22d3ee";       // cyan accent
+const DIM = "#334155";     // dim/null color
+const LABEL = "#3a4a5a";   // label color
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function SpeedGauge({ mph }: { mph: number | null }) {
   const MAX = 150;
   const cx = 70, cy = 70, r = 52;
   const circ = 2 * Math.PI * r;
-  // 270° arc from ~7:30 to ~4:30 o'clock; rotate(135) starts stroke at 7:30
   const trackLen = circ * 0.75;
   const gapLen = circ - trackLen;
-  const speed = Math.min(mph ?? 0, MAX);
-  const filled = trackLen * (speed / MAX);
+  const filled = trackLen * (Math.min(mph ?? 0, MAX) / MAX);
 
   return (
-    <div className="relative mx-auto" style={{ width: 140, height: 140 }}>
+    <div className="relative" style={{ width: 140, height: 140 }}>
       <svg width="140" height="140" viewBox="0 0 140 140">
-        {/* Track background */}
-        <circle
-          cx={cx} cy={cy} r={r}
-          fill="none" stroke="#1a2535" strokeWidth="9"
-          strokeDasharray={`${trackLen} ${gapLen}`}
-          strokeLinecap="round"
-          transform={`rotate(135 ${cx} ${cy})`}
-        />
-        {/* Speed fill */}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1a2535" strokeWidth="9"
+          strokeDasharray={`${trackLen} ${gapLen}`} strokeLinecap="round"
+          transform={`rotate(135 ${cx} ${cy})`} />
         {mph !== null && filled > 0 && (
-          <circle
-            cx={cx} cy={cy} r={r}
-            fill="none" stroke="#22d3ee" strokeWidth="9"
-            strokeDasharray={`${filled} ${circ - filled}`}
-            strokeLinecap="round"
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke={C} strokeWidth="9"
+            strokeDasharray={`${filled} ${circ - filled}`} strokeLinecap="round"
             transform={`rotate(135 ${cx} ${cy})`}
-            style={{ filter: "drop-shadow(0 0 5px rgba(34,211,238,0.55))" }}
-          />
+            style={{ filter: "drop-shadow(0 0 5px rgba(34,211,238,0.5))" }} />
         )}
-        {/* Tick at 0 and max */}
-        <circle cx={cx} cy={cy} r={r - 14}
-          fill="none" stroke="#0f1c2a" strokeWidth="0.5" strokeDasharray="1 8" />
       </svg>
-      {/* Center readout */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
         <span className="text-4xl font-mono font-bold leading-none"
-          style={{ color: mph !== null ? "#22d3ee" : "#334155",
-                   textShadow: mph !== null ? "0 0 12px rgba(34,211,238,0.4)" : "none" }}>
+          style={{ color: mph !== null ? C : DIM, textShadow: mph !== null ? `0 0 12px rgba(34,211,238,0.4)` : "none" }}>
           {mph !== null ? Math.round(mph) : "—"}
         </span>
-        <span className="text-[9px] font-mono tracking-[0.25em] mt-1 text-zinc-600">MPH</span>
+        <span className="text-[9px] font-mono tracking-[0.25em] mt-1" style={{ color: LABEL }}>MPH</span>
       </div>
     </div>
   );
 }
 
-// ── Compass ───────────────────────────────────────────────────────────────────
-
 function Compass({ heading }: { heading: number | null }) {
   const h = heading ?? 0;
   const hasFix = heading !== null;
-
   return (
-    <div className="flex items-center gap-4">
-      <svg width="76" height="76" viewBox="0 0 76 76">
-        {/* Outer ring */}
-        <circle cx="38" cy="38" r="34"
-          fill="none" stroke="#1a2535" strokeWidth="1.5" />
-        {/* Inner ring */}
-        <circle cx="38" cy="38" r="26"
-          fill="none" stroke="#0f1c2a" strokeWidth="0.5" />
-        {/* Cardinal ticks + labels */}
+    <div className="flex items-center gap-3">
+      <svg width="72" height="72" viewBox="0 0 72 72">
+        <circle cx="36" cy="36" r="32" fill="none" stroke="#1a2535" strokeWidth="1.5" />
+        <circle cx="36" cy="36" r="24" fill="none" stroke="#0f1c2a" strokeWidth="0.5" />
         {([
-          [0,   "#22d3ee", "N"],
-          [90,  "#374151", "E"],
-          [180, "#374151", "S"],
-          [270, "#374151", "W"],
-        ] as [number, string, string][]).map(([a, color, label]) => {
+          [0, C, "N"], [90, "#374151", "E"], [180, "#374151", "S"], [270, "#374151", "W"]
+        ] as [number, string, string][]).map(([a, color, lbl]) => {
           const rad = ((a - 90) * Math.PI) / 180;
-          const x1 = 38 + 27 * Math.cos(rad), y1 = 38 + 27 * Math.sin(rad);
-          const x2 = 38 + 34 * Math.cos(rad), y2 = 38 + 34 * Math.sin(rad);
-          const tx = 38 + 19 * Math.cos(rad), ty = 38 + 19 * Math.sin(rad) + 3;
           return (
             <g key={a}>
-              <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={a === 0 ? 2 : 1} />
-              <text x={tx} y={ty} textAnchor="middle" fill={color}
-                fontSize={a === 0 ? "8" : "6"} fontFamily="monospace" fontWeight={a === 0 ? "bold" : "normal"}>
-                {label}
+              <line x1={36 + 26 * Math.cos(rad)} y1={36 + 26 * Math.sin(rad)}
+                x2={36 + 32 * Math.cos(rad)} y2={36 + 32 * Math.sin(rad)}
+                stroke={color} strokeWidth={a === 0 ? 2 : 1} />
+              <text x={36 + 18 * Math.cos(rad)} y={36 + 18 * Math.sin(rad) + 3}
+                textAnchor="middle" fill={color} fontSize={a === 0 ? "8" : "6"} fontFamily="monospace">
+                {lbl}
               </text>
             </g>
           );
         })}
-        {/* Intercardinal ticks */}
         {[45, 135, 225, 315].map((a) => {
           const rad = ((a - 90) * Math.PI) / 180;
-          return (
-            <line key={a}
-              x1={38 + 30 * Math.cos(rad)} y1={38 + 30 * Math.sin(rad)}
-              x2={38 + 34 * Math.cos(rad)} y2={38 + 34 * Math.sin(rad)}
-              stroke="#1e2d3d" strokeWidth="1" />
-          );
+          return <line key={a} x1={36 + 28 * Math.cos(rad)} y1={36 + 28 * Math.sin(rad)}
+            x2={36 + 32 * Math.cos(rad)} y2={36 + 32 * Math.sin(rad)}
+            stroke="#1e2d3d" strokeWidth="1" />;
         })}
-        {/* Needle */}
-        <g transform={`rotate(${h} 38 38)`} opacity={hasFix ? 1 : 0.25}>
-          <polygon points="38,8 35.5,38 38,34 40.5,38"
-            fill="#22d3ee"
+        <g transform={`rotate(${h} 36 36)`} opacity={hasFix ? 1 : 0.2}>
+          <polygon points="36,7 33.5,36 36,32 38.5,36" fill={C}
             style={{ filter: "drop-shadow(0 0 3px rgba(34,211,238,0.8))" }} />
-          <polygon points="38,68 35.5,38 38,42 40.5,38" fill="#334155" />
+          <polygon points="36,65 33.5,36 36,40 38.5,36" fill="#334155" />
         </g>
-        {/* Hub */}
-        <circle cx="38" cy="38" r="3" fill="#22d3ee" />
+        <circle cx="36" cy="36" r="2.5" fill={C} />
       </svg>
-
       <div className="flex flex-col">
-        <span className="text-2xl font-mono font-bold leading-none"
-          style={{ color: hasFix ? "#22d3ee" : "#334155",
-                   textShadow: hasFix ? "0 0 10px rgba(34,211,238,0.4)" : "none" }}>
+        <span className="text-xl font-mono font-bold leading-none"
+          style={{ color: hasFix ? C : DIM, textShadow: hasFix ? `0 0 10px rgba(34,211,238,0.4)` : "none" }}>
           {hasFix ? headingToCardinal(h) : "—"}
         </span>
-        <span className="text-sm font-mono text-zinc-500 mt-1">
+        <span className="text-xs font-mono mt-1" style={{ color: hasFix ? "#4a7a8a" : DIM }}>
           {hasFix ? `${Math.round(h)}°` : "—"}
         </span>
+      </div>
+    </div>
+  );
+}
+
+function GForceDot({ gLat, gLon }: { gLat: number | null; gLon: number | null }) {
+  const MAX_G = 1.5;
+  const hasFix = gLat !== null && gLon !== null;
+  const g = hasFix ? Math.sqrt(gLat! ** 2 + gLon! ** 2) : 0;
+  const dotColor = g < 0.5 ? C : g < 1.0 ? "#f59e0b" : "#ef4444";
+  const dx = hasFix ? (gLat! / MAX_G) * 36 : 0;
+  const dy = hasFix ? -(gLon! / MAX_G) * 36 : 0;  // negative = forward = up
+
+  return (
+    <div>
+      <div className="text-[9px] tracking-[0.2em] mb-2 font-mono" style={{ color: LABEL }}>G-FORCE</div>
+      <div className="flex items-center gap-3">
+        <svg width="88" height="88" viewBox="-44 -44 88 88">
+          {/* Rings */}
+          {[36, 24, 12].map((r, i) => (
+            <circle key={r} cx="0" cy="0" r={r} fill="none"
+              stroke={i === 0 ? "#1a2535" : "#0f1c2a"} strokeWidth={i === 0 ? 1.5 : 0.75} />
+          ))}
+          {/* Crosshair */}
+          <line x1="-36" y1="0" x2="36" y2="0" stroke="#1a2535" strokeWidth="0.5" />
+          <line x1="0" y1="-36" x2="0" y2="36" stroke="#1a2535" strokeWidth="0.5" />
+          {/* Labels */}
+          <text y="-38" textAnchor="middle" fill="#1e2d3d" fontSize="5" fontFamily="monospace">ACCEL</text>
+          <text y="43" textAnchor="middle" fill="#1e2d3d" fontSize="5" fontFamily="monospace">BRAKE</text>
+          <text x="40" y="2" textAnchor="middle" fill="#1e2d3d" fontSize="5" fontFamily="monospace">R</text>
+          <text x="-40" y="2" textAnchor="middle" fill="#1e2d3d" fontSize="5" fontFamily="monospace">L</text>
+          {/* Dot */}
+          {hasFix && (
+            <circle cx={dx} cy={dy} r="4" fill={dotColor}
+              style={{ filter: `drop-shadow(0 0 4px ${dotColor})` }} />
+          )}
+        </svg>
+        <div className="font-mono text-xs" style={{ color: "#4a7a8a" }}>
+          <div>LAT <span style={{ color: hasFix ? C : DIM }}>{hasFix ? fmt1(gLat) : "—"}<span style={{ color: LABEL }}>g</span></span></div>
+          <div className="mt-1">LON <span style={{ color: hasFix ? C : DIM }}>{hasFix ? fmt1(gLon) : "—"}<span style={{ color: LABEL }}>g</span></span></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PedalBars({ throttle, brake }: { throttle: number | null; brake: number | null }) {
+  const Bar = ({ value, color, label }: { value: number | null; color: string; label: string }) => (
+    <div>
+      <div className="flex justify-between font-mono text-[9px] mb-1">
+        <span style={{ color: LABEL }}>{label}</span>
+        <span style={{ color: value !== null ? color : DIM }}>{value !== null ? `${Math.round(value)}%` : "—"}</span>
+      </div>
+      <div className="h-2 rounded-full" style={{ background: "#1a2535" }}>
+        <div className="h-2 rounded-full transition-all duration-100"
+          style={{ width: `${Math.min(value ?? 0, 100)}%`, background: color,
+            boxShadow: (value ?? 0) > 5 ? `0 0 6px ${color}88` : "none" }} />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-[9px] tracking-[0.2em] font-mono" style={{ color: LABEL }}>INPUTS</div>
+      <Bar value={throttle} color="#22c55e" label="THROTTLE" />
+      <Bar value={brake} color="#ef4444" label="BRAKE" />
+    </div>
+  );
+}
+
+function RPMBar({ rpm }: { rpm: number | null }) {
+  const MAX_RPM = 8000;
+  const RED_ZONE = 6500;
+  const pct = Math.min((rpm ?? 0) / MAX_RPM, 1) * 100;
+  const inRedZone = (rpm ?? 0) > RED_ZONE;
+  const barColor = inRedZone ? "#ef4444" : rpm !== null && rpm > 4000 ? "#f59e0b" : C;
+
+  return (
+    <div>
+      <div className="flex justify-between font-mono text-[9px] mb-1">
+        <span style={{ color: LABEL }}>RPM</span>
+        <span style={{ color: rpm !== null ? barColor : DIM }}>
+          {rpm !== null ? rpm.toLocaleString() : "—"}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full" style={{ background: "#1a2535" }}>
+        <div className="h-1.5 rounded-full transition-all duration-100"
+          style={{ width: `${pct}%`, background: barColor,
+            boxShadow: inRedZone ? `0 0 6px #ef444488` : "none" }} />
+      </div>
+      <div className="flex justify-between font-mono text-[8px] mt-0.5">
+        <span style={{ color: "#1e2d3d" }}>0</span>
+        <span style={{ color: "#ef444466" }}>{RED_ZONE.toLocaleString()} ⬆</span>
+        <span style={{ color: "#1e2d3d" }}>{MAX_RPM.toLocaleString()}</span>
+      </div>
+    </div>
+  );
+}
+
+function TyreGrid({ tel }: { tel: TelemetryData }) {
+  const corners = [
+    { label: "LF", press: tel.tyre_press_lf, temp: tel.tyre_temp_lf },
+    { label: "RF", press: tel.tyre_press_rf, temp: tel.tyre_temp_rf },
+    { label: "LR", press: tel.tyre_press_lr, temp: tel.tyre_temp_lr },
+    { label: "RR", press: tel.tyre_press_rr, temp: tel.tyre_temp_rr },
+  ];
+
+  return (
+    <div>
+      <div className="text-[9px] tracking-[0.2em] mb-2 font-mono" style={{ color: LABEL }}>TYRES</div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {corners.map(({ label, press, temp }) => (
+          <div key={label} className="rounded p-1.5 font-mono" style={{ background: "#0d1620" }}>
+            <div className="text-[9px]" style={{ color: LABEL }}>{label}</div>
+            <div className="text-sm font-bold leading-tight" style={{ color: C }}>
+              {press ?? "—"}
+              <span className="text-[8px] font-normal" style={{ color: LABEL }}> PSI</span>
+            </div>
+            <div className="text-[9px]" style={{ color: "#4a7a8a" }}>
+              {temp !== null ? `${temp}°C` : "—"}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -144,34 +252,60 @@ function Compass({ heading }: { heading: number | null }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function VideoModal({
-  src,
-  seekSeconds,
-  utcTime,
-  telemetry,
-  onClose,
+  src, seekSeconds, utcTime, telemetry: initialTelemetry, track,
+  onClose, onPositionUpdate,
 }: VideoModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<Plyr | null>(null);
+  const [telemetry, setTelemetry] = useState<TelemetryData>(initialTelemetry);
+
+  // Throttle telemetry updates to ~8 fps to keep React renders manageable
+  const lastUpdateRef = useRef(0);
+
+  const handleTimeUpdate = useCallback(() => {
+    const player = playerRef.current;
+    if (!player) return;
+    const now = performance.now();
+    if (now - lastUpdateRef.current < 125) return; // ~8 fps
+    lastUpdateRef.current = now;
+
+    const t = player.currentTime;
+    const tel = extractTelemetry(track, t);
+    const gps = nearestGps(track, t);
+    if (gps) {
+      tel.lat = gps.lat;
+      tel.lng = gps.lng;
+      tel.altitude_m = gps.alt;
+      tel.heading = gps.heading;
+    }
+    setTelemetry(tel);
+    if (gps && onPositionUpdate) onPositionUpdate(gps.lat, gps.lng);
+  }, [track, onPositionUpdate]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+
     const player = new Plyr(video, {
-      controls: ["play", "progress", "current-time", "duration", "fullscreen"],
+      controls: ["play", "progress", "current-time", "duration", "mute", "volume", "fullscreen"],
       keyboard: { focused: true, global: false },
     });
     playerRef.current = player;
-    const onReady = () => {
-      player.currentTime = seekSeconds;
-      void player.play();
-    };
-    player.on("ready", onReady);
+
+    // Seek on ready; also try after metadata loads for remote videos
+    const seekTo = () => { player.currentTime = seekSeconds; void player.play(); };
+    player.on("ready", seekTo);
+    player.on("loadedmetadata", seekTo);
+    player.on("timeupdate", handleTimeUpdate);
+
     return () => {
-      player.off("ready", onReady);
+      player.off("ready", seekTo);
+      player.off("loadedmetadata", seekTo);
+      player.off("timeupdate", handleTimeUpdate);
       player.destroy();
       playerRef.current = null;
     };
-  }, [src, seekSeconds]);
+  }, [src, seekSeconds, handleTimeUpdate]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -184,33 +318,24 @@ export default function VideoModal({
     hour: "2-digit", minute: "2-digit", timeZoneName: "short",
   });
 
-  const altFt = telemetry.altitude_m != null
-    ? Math.round(telemetry.altitude_m * 3.28084)
-    : null;
-
+  const altFt = telemetry.altitude_m != null ? Math.round(telemetry.altitude_m * 3.28084) : null;
   const lngAbs = telemetry.lng != null ? Math.abs(telemetry.lng) : null;
   const lngDir = telemetry.lng != null ? (telemetry.lng < 0 ? "W" : "E") : null;
   const latDir = telemetry.lat != null ? (telemetry.lat >= 0 ? "N" : "S") : null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.82)", backdropFilter: "blur(3px)" }}
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(3px)" }}
+      onClick={onClose}>
       <div
-        className="relative flex w-full max-w-6xl mx-4 rounded-xl overflow-hidden shadow-2xl"
+        className="relative flex flex-col md:flex-row w-full max-w-6xl mx-2 md:mx-4 rounded-xl overflow-hidden shadow-2xl max-h-screen md:max-h-[90vh]"
         style={{ border: "1px solid rgba(34,211,238,0.12)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+        onClick={(e) => e.stopPropagation()}>
+
         {/* ── Video panel ── */}
         <div className="flex-1 min-w-0 bg-black flex flex-col">
-          <div className="flex items-center justify-end px-3 py-2 bg-zinc-950">
-            <button
-              onClick={onClose}
-              className="text-zinc-500 hover:text-white transition-colors text-lg leading-none"
-              aria-label="Close"
-            >✕</button>
+          <div className="flex items-center justify-end px-3 py-1.5 bg-zinc-950">
+            <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors text-lg leading-none" aria-label="Close">✕</button>
           </div>
           <video ref={videoRef} className="w-full" playsInline>
             <source src={src} type="video/mp4" />
@@ -219,68 +344,108 @@ export default function VideoModal({
 
         {/* ── Telemetry panel ── */}
         <div
-          className="flex-shrink-0 flex flex-col gap-5 p-5 font-mono overflow-y-auto"
+          className="flex-shrink-0 overflow-y-auto font-mono"
           style={{
-            width: 220,
+            width: "100%", // overridden by md:w-72 below
             background: "#080c10",
-            borderLeft: "1px solid rgba(34,211,238,0.1)",
-          }}
-        >
-          {/* VELOCITY */}
-          <div>
-            <div className="text-[9px] tracking-[0.2em] mb-3" style={{ color: "#3a4a5a" }}>VELOCITY</div>
-            <SpeedGauge mph={telemetry.speed_mph} />
-          </div>
+            borderTop: "1px solid rgba(34,211,238,0.1)",
+          }}>
+          {/* md: fixed width sidebar; mobile: full-width strip */}
+          <style>{`@media (min-width: 768px) { .tel-panel { width: 256px; border-top: none; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }`}</style>
+          <div className="tel-panel flex flex-col gap-4 p-4">
 
-          <div style={{ height: 1, background: "rgba(34,211,238,0.08)" }} />
-
-          {/* HEADING */}
-          <div>
-            <div className="text-[9px] tracking-[0.2em] mb-3" style={{ color: "#3a4a5a" }}>HEADING</div>
-            <Compass heading={telemetry.heading} />
-          </div>
-
-          <div style={{ height: 1, background: "rgba(34,211,238,0.08)" }} />
-
-          {/* POSITION */}
-          <div>
-            <div className="text-[9px] tracking-[0.2em] mb-2" style={{ color: "#3a4a5a" }}>POSITION</div>
-            <div className="text-sm leading-relaxed" style={{ color: "#22d3ee" }}>
-              {telemetry.lat != null
-                ? <>{Math.abs(telemetry.lat).toFixed(4)}°&nbsp;{latDir}</>
-                : <span style={{ color: "#334155" }}>—</span>}
+            {/* Speed + Gear */}
+            <div className="flex items-center gap-4">
+              <SpeedGauge mph={telemetry.speed_mph} />
+              <div className="flex flex-col items-center">
+                <div className="text-[9px] tracking-[0.2em]" style={{ color: LABEL }}>GEAR</div>
+                <div className="text-5xl font-bold leading-none mt-1"
+                  style={{ color: telemetry.gear !== null ? C : DIM,
+                    textShadow: telemetry.gear !== null ? "0 0 15px rgba(34,211,238,0.5)" : "none" }}>
+                  {gearLabel(telemetry.gear)}
+                </div>
+              </div>
             </div>
-            <div className="text-sm leading-relaxed" style={{ color: "#22d3ee" }}>
-              {lngAbs != null
-                ? <>{lngAbs.toFixed(4)}°&nbsp;{lngDir}</>
-                : <span style={{ color: "#334155" }}>—</span>}
+
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
+
+            {/* G-force + Heading side by side on mobile, stacked on panel */}
+            <GForceDot gLat={telemetry.g_lat} gLon={telemetry.g_lon} />
+
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
+
+            {/* Pedals */}
+            <PedalBars throttle={telemetry.throttle_pct} brake={telemetry.brake_pct} />
+
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
+
+            {/* RPM */}
+            <RPMBar rpm={telemetry.rpm} />
+
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
+
+            {/* Heading */}
+            <div>
+              <div className="text-[9px] tracking-[0.2em] mb-2" style={{ color: LABEL }}>HEADING</div>
+              <Compass heading={telemetry.heading} />
             </div>
-          </div>
 
-          <div style={{ height: 1, background: "rgba(34,211,238,0.08)" }} />
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
 
-          {/* ELEVATION */}
-          <div>
-            <div className="text-[9px] tracking-[0.2em] mb-2" style={{ color: "#3a4a5a" }}>ELEVATION</div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold leading-none"
-                style={{ color: altFt != null ? "#22d3ee" : "#334155",
-                         textShadow: altFt != null ? "0 0 10px rgba(34,211,238,0.35)" : "none" }}>
-                {altFt != null ? altFt.toLocaleString() : "—"}
-              </span>
-              {altFt != null && (
-                <span className="text-[10px]" style={{ color: "#3a4a5a" }}>FT</span>
-              )}
+            {/* Engine */}
+            <div>
+              <div className="text-[9px] tracking-[0.2em] mb-2" style={{ color: LABEL }}>ENGINE</div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {[
+                  ["OIL °C", telemetry.oil_temp_c],
+                  ["COOLANT °C", telemetry.coolant_temp_c],
+                  ["OIL PSI", telemetry.oil_pressure],
+                  ["FUEL %", telemetry.fuel_pct],
+                ].map(([label, val]) => (
+                  <div key={label as string} className="rounded p-1.5" style={{ background: "#0d1620" }}>
+                    <div className="text-[8px]" style={{ color: LABEL }}>{label}</div>
+                    <div className="font-bold text-sm" style={{ color: val !== null ? C : DIM }}>
+                      {val !== null ? val : "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div style={{ height: 1, background: "rgba(34,211,238,0.08)" }} />
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
 
-          {/* TIMESTAMP */}
-          <div className="mt-auto">
-            <div className="text-[9px] tracking-[0.2em] mb-2" style={{ color: "#3a4a5a" }}>TIMESTAMP</div>
-            <div className="text-[11px] leading-relaxed" style={{ color: "#4a7a8a" }}>
-              {formattedTime}
+            {/* Tyres */}
+            <TyreGrid tel={telemetry} />
+
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
+
+            {/* Position + Elevation */}
+            <div>
+              <div className="text-[9px] tracking-[0.2em] mb-2" style={{ color: LABEL }}>POSITION</div>
+              <div className="text-sm leading-relaxed" style={{ color: C }}>
+                {telemetry.lat != null
+                  ? <>{Math.abs(telemetry.lat).toFixed(4)}°&nbsp;{latDir}</>
+                  : <span style={{ color: DIM }}>—</span>}
+              </div>
+              <div className="text-sm leading-relaxed" style={{ color: C }}>
+                {lngAbs != null
+                  ? <>{lngAbs.toFixed(4)}°&nbsp;{lngDir}</>
+                  : <span style={{ color: DIM }}>—</span>}
+              </div>
+              <div className="flex items-baseline gap-1.5 mt-2">
+                <div className="text-[9px] tracking-[0.2em]" style={{ color: LABEL }}>ELEV</div>
+                <span className="text-sm font-bold" style={{ color: altFt != null ? C : DIM }}>
+                  {altFt != null ? `${altFt.toLocaleString()} ft` : "—"}
+                </span>
+              </div>
+            </div>
+
+            <div style={{ height: 1, background: "rgba(34,211,238,0.07)" }} />
+
+            {/* Timestamp */}
+            <div>
+              <div className="text-[9px] tracking-[0.2em] mb-1" style={{ color: LABEL }}>TIMESTAMP</div>
+              <div className="text-[11px] leading-relaxed" style={{ color: "#4a7a8a" }}>{formattedTime}</div>
             </div>
           </div>
         </div>

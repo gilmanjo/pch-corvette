@@ -7,7 +7,7 @@ import { resolveClip, type ResolvedClip } from "@/lib/resolveClip";
 import VideoModal from "@/components/VideoModal";
 
 const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? "";
-const STYLE_URL = `https://api.maptiler.com/maps/streets-v2/style.json?key=${MAPTILER_KEY}`;
+const STYLE_URL = `https://api.maptiler.com/maps/topo-v2/style.json?key=${MAPTILER_KEY}`;
 
 const TIMELINE_SOURCE = "route-timeline";
 const TIMELINE_LAYER = "route-timeline-line";
@@ -33,6 +33,8 @@ interface TooltipState {
   y: number;
   utc: string;
   speed_mph: number | null;
+  lat: number;
+  lng: number;
 }
 
 export default function RouteMap() {
@@ -40,6 +42,7 @@ export default function RouteMap() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const indexRef = useRef<ClipIndex | null>(null);
   const resolvingRef = useRef(false);
+  const carMarkerRef = useRef<maplibregl.Marker | null>(null);
   const [resolving, setResolving] = useState(false);
   const [noClip, setNoClip] = useState(false);
   const [activeClip, setActiveClip] = useState<ResolvedClip | null>(null);
@@ -176,6 +179,8 @@ export default function RouteMap() {
           y: e.point.y,
           utc: props.utc,
           speed_mph: props.speed_mph,
+          lat: e.lngLat.lat,
+          lng: e.lngLat.lng,
         });
       });
       map.on("click", PDR_LAYER, (e) => {
@@ -229,6 +234,9 @@ export default function RouteMap() {
           {tooltip.speed_mph !== null && (
             <div className="text-zinc-300">{tooltip.speed_mph} mph</div>
           )}
+          <div className="text-zinc-400 text-[10px] mt-0.5">
+            {tooltip.lat.toFixed(4)}, {tooltip.lng.toFixed(4)}
+          </div>
         </div>
       )}
 
@@ -246,7 +254,25 @@ export default function RouteMap() {
           seekSeconds={activeClip.seekSeconds}
           utcTime={activeClip.utcTime}
           telemetry={activeClip.telemetry}
-          onClose={() => setActiveClip(null)}
+          track={activeClip.track}
+          onPositionUpdate={(lat, lng) => {
+            if (!mapRef.current) return;
+            if (!carMarkerRef.current) {
+              const el = document.createElement("div");
+              el.style.cssText =
+                "width:24px;height:24px;background:#e85d04;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px rgba(232,93,4,0.8);";
+              carMarkerRef.current = new maplibregl.Marker({ element: el })
+                .setLngLat([lng, lat])
+                .addTo(mapRef.current);
+            } else {
+              carMarkerRef.current.setLngLat([lng, lat]);
+            }
+          }}
+          onClose={() => {
+            carMarkerRef.current?.remove();
+            carMarkerRef.current = null;
+            setActiveClip(null);
+          }}
         />
       )}
     </>

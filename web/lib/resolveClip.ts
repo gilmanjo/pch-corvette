@@ -3,45 +3,92 @@ import { point, featureCollection } from "@turf/helpers";
 import type { ClipEntry, ClipIndex } from "./clipIndex";
 
 // R2 base URL for video files only.
-// Track files are always served from the same origin (/tracks/),
-// since they're included in the static build via web/public/tracks/.
+// Track files are always served from the same origin (/tracks/).
 const VIDEO_BASE = process.env.NEXT_PUBLIC_MEDIA_BASE_URL ?? "";
 
+// ── Telemetry types ───────────────────────────────────────────────────────────
+
 export interface TelemetryData {
+  // Movement
   speed_mph: number | null;
   heading: number | null;
   lat: number | null;
   lng: number | null;
   altitude_m: number | null;
+  // Dynamics (g-forces, steering)
+  g_lat: number | null;      // g, positive = right
+  g_lon: number | null;      // g, positive = forward/acceleration
+  steering_deg: number | null;
+  // Driver inputs
+  throttle_pct: number | null;
+  brake_pct: number | null;
+  // Powertrain
+  rpm: number | null;
+  gear: number | null;       // 0=N, 1-8=gear, 9=R
+  // Engine health
+  oil_temp_c: number | null;
+  oil_pressure: number | null;
+  coolant_temp_c: number | null;
+  // Tyres (raw units — likely PSI; may need calibration)
+  tyre_press_lf: number | null;
+  tyre_press_rf: number | null;
+  tyre_press_lr: number | null;
+  tyre_press_rr: number | null;
+  tyre_temp_lf: number | null;
+  tyre_temp_rf: number | null;
+  tyre_temp_lr: number | null;
+  tyre_temp_rr: number | null;
+  // Other
+  fuel_pct: number | null;
 }
 
 export interface ResolvedClip {
-  /** Original .mov filename, e.g. "pdr_20210529_085856Z.mov" */
   file: string;
-  /** Transcoded video URL (R2 in prod, local stub in dev) */
   videoUrl: string;
-  /** Seek offset in seconds within the clip */
   seekSeconds: number;
-  /** UTC timestamp string at this point in the trip */
   utcTime: string;
-  /** Telemetry at the resolved point */
   telemetry: TelemetryData;
+  /** Full track data for dynamic telemetry lookups as the video plays. */
+  track: TrackFile;
 }
 
-// GPS point as stored in the track file: [t, lat, lng, alt_m, hdg_deg]
-type GpsPoint = [number, number, number, ...number[]];
+// ── Track file types (exported for VideoModal dynamic lookups) ────────────────
 
-interface TrackFile {
+type TelemetrySeries = [number, number][];  // [t, raw_value]
+
+export interface TrackFile {
   duration: number;
-  gps: GpsPoint[];
+  gps: [number, number, number, ...number[]][];
   telemetry?: {
-    speed?: [number, number][]; // [t, raw_speed], raw_speed / 100 = km/h
+    speed?: TelemetrySeries;
+    accel_lateral?: TelemetrySeries;     // raw / 1000 = g
+    accel_longitudinal?: TelemetrySeries; // raw / 1000 = g
+    throttle_pos?: TelemetrySeries;
+    brake_pos?: TelemetrySeries;
+    rpm?: TelemetrySeries;
+    gear?: TelemetrySeries;
+    oil_temp?: TelemetrySeries;           // raw °C
+    oil_pressure?: TelemetrySeries;       // raw PSI
+    coolant_temp?: TelemetrySeries;       // raw °C
+    steering_angle?: TelemetrySeries;     // (raw - 32768) / 100 = degrees
+    tyre_pressure_lf?: TelemetrySeries;
+    tyre_pressure_rf?: TelemetrySeries;
+    tyre_pressure_lr?: TelemetrySeries;
+    tyre_pressure_rr?: TelemetrySeries;
+    tyre_temp_lf?: TelemetrySeries;
+    tyre_temp_rf?: TelemetrySeries;
+    tyre_temp_lr?: TelemetrySeries;
+    tyre_temp_rr?: TelemetrySeries;
+    fuel_level?: TelemetrySeries;
+    [key: string]: TelemetrySeries | undefined;
   };
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 const trackCache = new Map<string, TrackFile>();
 
-async function fetchTrack(trackPath: string): Promise<TrackFile> {
+export async function fetchTrack(trackPath: string): Promise<TrackFile> {
   if (trackCache.has(trackPath)) return trackCache.get(trackPath)!;
   const url = `/${trackPath}`;
   const res = await fetch(url);
@@ -51,34 +98,35 @@ async function fetchTrack(trackPath: string): Promise<TrackFile> {
   return data;
 }
 
-/** Convert clip filename to video URL. */
-function videoUrl(file: string): string {
-  const mp4 = file.replace(".mov", ".mp4");
-  return `${VIDEO_BASE}/video/${mp4}`;
-}
-
-/** Derive UTC time string from clip start + seek offset. */
-function utcAtSeek(tStart: string, seekSeconds: number): string {
-  const ms = new Date(tStart).getTime() + seekSeconds * 1000;
-  return new Date(ms).toISOString();
-}
-
-/** Find speed in mph nearest to time t, within 2s tolerance. */
-function nearestSpeed(
-  records: [number, number][] | undefined,
-  t: number
+/**
+ * Find the value nearest to time t in a telemetry series.
+ * Returns null if no sample within maxGapS seconds.
+ */
+export function nearestVal(
+  records: TelemetrySeries | undefined,
+  t: number,
+  maxGapS = 5,
+  scale = 1
 ): number | null {
   if (!records?.length) return null;
   let best = records[0];
   for (const r of records) {
     if (Math.abs(r[0] - t) < Math.abs(best[0] - t)) best = r;
   }
-  if (Math.abs(best[0] - t) > 2) return null;
-  const kmh = best[1] / 100;
-  return Math.round(kmh * 0.621371 * 10) / 10;
+  if (Math.abs(best[0] - t) > maxGapS) return null;
+  return best[1] * scale;
 }
 
-/** Bbox pre-filter with a small padding for edge clicks. */
+function videoUrl(file: string): string {
+  const mp4 = file.replace(".mov", ".mp4");
+  return `${VIDEO_BASE}/video/${mp4}`;
+}
+
+function utcAtSeek(tStart: string, seekSeconds: number): string {
+  const ms = new Date(tStart).getTime() + seekSeconds * 1000;
+  return new Date(ms).toISOString();
+}
+
 function inBbox(
   lng: number,
   lat: number,
@@ -93,16 +141,71 @@ function inBbox(
   );
 }
 
-/**
- * Given a clicked LngLat and the loaded clip index, returns the best
- * matching clip and seek offset, or null if no clip is nearby.
- *
- * Strategy:
- *   1. Filter chunks by expanded bounding box (fast).
- *   2. Fetch GPS track for each candidate (cached after first fetch).
- *   3. Use turf nearestPoint to find the closest GPS fix.
- *   4. Return the clip + seek offset for the globally closest fix.
- */
+/** Extract a full TelemetryData snapshot from a track at seek time t. */
+export function extractTelemetry(track: TrackFile, t: number): TelemetryData {
+  const tel = track.telemetry ?? {};
+  const rawSpeed = nearestVal(tel.speed, t, 5);
+  const speedMph =
+    rawSpeed !== null
+      ? Math.round((rawSpeed / 100) * 0.621371 * 10) / 10
+      : null;
+
+  const rawGear = nearestVal(tel.gear, t, 10);
+  const gear = rawGear !== null && rawGear >= 0 && rawGear <= 9 ? rawGear : null;
+
+  const rawSteering = nearestVal(tel.steering_angle, t, 2);
+  const steeringDeg =
+    rawSteering !== null ? Math.round((rawSteering - 32768) / 100) : null;
+
+  return {
+    speed_mph: speedMph,
+    heading: null, // filled from GPS below
+    lat: null,
+    lng: null,
+    altitude_m: null,
+    g_lat: nearestVal(tel.accel_lateral, t, 2, 1 / 1000),
+    g_lon: nearestVal(tel.accel_longitudinal, t, 2, 1 / 1000),
+    steering_deg: steeringDeg,
+    throttle_pct: nearestVal(tel.throttle_pos, t, 5),
+    brake_pct: nearestVal(tel.brake_pos, t, 5),
+    rpm: nearestVal(tel.rpm, t, 2),
+    gear,
+    oil_temp_c: nearestVal(tel.oil_temp, t, 10),
+    oil_pressure: nearestVal(tel.oil_pressure, t, 10),
+    coolant_temp_c: nearestVal(tel.coolant_temp, t, 10),
+    tyre_press_lf: nearestVal(tel.tyre_pressure_lf, t, 10),
+    tyre_press_rf: nearestVal(tel.tyre_pressure_rf, t, 10),
+    tyre_press_lr: nearestVal(tel.tyre_pressure_lr, t, 10),
+    tyre_press_rr: nearestVal(tel.tyre_pressure_rr, t, 10),
+    tyre_temp_lf: nearestVal(tel.tyre_temp_lf, t, 10),
+    tyre_temp_rf: nearestVal(tel.tyre_temp_rf, t, 10),
+    tyre_temp_lr: nearestVal(tel.tyre_temp_lr, t, 10),
+    tyre_temp_rr: nearestVal(tel.tyre_temp_rr, t, 10),
+    fuel_pct: nearestVal(tel.fuel_level, t, 10),
+  };
+}
+
+/** Find the GPS point nearest to seek time t. */
+export function nearestGps(
+  track: TrackFile,
+  t: number
+): { lat: number; lng: number; alt: number | null; heading: number | null } | null {
+  if (!track.gps.length) return null;
+  let best = track.gps[0];
+  for (const pt of track.gps) {
+    if (Math.abs(pt[0] - t) < Math.abs(best[0] - t)) best = pt;
+  }
+  if (Math.abs(best[0] - t) > 5) return null;
+  return {
+    lat: best[1],
+    lng: best[2],
+    alt: best.length > 3 ? best[3] : null,
+    heading: best.length > 4 ? best[4] : null,
+  };
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
 export async function resolveClip(
   lng: number,
   lat: number,
@@ -135,30 +238,28 @@ export async function resolveClip(
       if (distKm < bestDistKm) {
         bestDistKm = distKm;
         const seekSeconds = nearest.properties.t as number;
-        // Find the matching GPS point for telemetry
-        const ptIdx = track.gps.findIndex((p) => p[0] === seekSeconds);
-        const pt = ptIdx >= 0 ? track.gps[ptIdx] : null;
+
+        const telemetry = extractTelemetry(track, seekSeconds);
+        const gps = nearestGps(track, seekSeconds);
+        if (gps) {
+          telemetry.lat = gps.lat;
+          telemetry.lng = gps.lng;
+          telemetry.altitude_m = gps.alt;
+          telemetry.heading = gps.heading;
+        }
 
         best = {
           file: chunk.file,
           videoUrl: videoUrl(chunk.file),
           seekSeconds,
           utcTime: utcAtSeek(chunk.t_start, seekSeconds),
-          telemetry: {
-            lat: pt ? pt[1] : null,
-            lng: pt ? pt[2] : null,
-            altitude_m: pt && pt.length > 3 ? pt[3] : null,
-            heading: pt && pt.length > 4 ? pt[4] : null,
-            speed_mph: nearestSpeed(track.telemetry?.speed, seekSeconds),
-          },
+          telemetry,
+          track,
         };
       }
     })
   );
 
-  // Reject if the nearest GPS point is > 2 km from the click.
-  // 2 km (vs 1 km) accounts for drift between Timeline route and PDR GPS.
   if (bestDistKm > 2) return null;
-
   return best;
 }
