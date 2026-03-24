@@ -337,7 +337,7 @@ export default function VideoModal({
         onClick={(e) => e.stopPropagation()}>
 
         {/* ── Video panel ── */}
-        <div className="flex-1 min-w-0 bg-black flex flex-col">
+        <div className="flex-shrink-0 md:flex-1 min-w-0 bg-black flex flex-col">
           <div className="flex items-center justify-end px-3 py-1.5 bg-zinc-950">
             <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors text-lg leading-none" aria-label="Close">✕</button>
           </div>
@@ -348,7 +348,7 @@ export default function VideoModal({
 
         {/* ── Telemetry panel ── */}
         {/* tel-panel controls width: full on mobile, 256px sidebar on md+ */}
-        <style>{`.tel-panel { width: 100%; border-top: 1px solid rgba(34,211,238,0.1); overflow-y: auto; flex-shrink: 0; } @media (min-width: 768px) { .tel-panel { width: 256px; border-top: none; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }`}</style>
+        <style>{`.tel-panel { width: 100%; border-top: 1px solid rgba(34,211,238,0.1); overflow-y: auto; flex: 1 1 0; min-height: 0; } @media (min-width: 768px) { .tel-panel { width: 256px; flex: 0 0 auto; border-top: none; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }`}</style>
         <div className="tel-panel font-mono" style={{ background: "#080c10" }}>
           <div className="flex flex-col gap-4 p-4">
 
