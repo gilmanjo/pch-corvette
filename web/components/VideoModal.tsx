@@ -62,7 +62,7 @@ function SpeedGauge({ mph }: { mph: number | null }) {
           <circle cx={cx} cy={cy} r={r} fill="none" stroke={C} strokeWidth="9"
             strokeDasharray={`${filled} ${circ - filled}`} strokeLinecap="round"
             transform={`rotate(135 ${cx} ${cy})`}
-            style={{ filter: "drop-shadow(0 0 5px rgba(34,211,238,0.5))" }} />
+            style={{ filter: "drop-shadow(0 0 5px rgba(34,211,238,0.5))", transition: "stroke-dasharray 0.3s ease" }} />
         )}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
@@ -106,7 +106,7 @@ function Compass({ heading }: { heading: number | null }) {
             x2={36 + 32 * Math.cos(rad)} y2={36 + 32 * Math.sin(rad)}
             stroke="#1e2d3d" strokeWidth="1" />;
         })}
-        <g transform={`rotate(${h} 36 36)`} opacity={hasFix ? 1 : 0.2}>
+        <g style={{ transform: `rotate(${h}deg)`, transformOrigin: "36px 36px", transition: "transform 0.3s ease" }} opacity={hasFix ? 1 : 0.2}>
           <polygon points="36,7 33.5,36 36,32 38.5,36" fill={C}
             style={{ filter: "drop-shadow(0 0 3px rgba(34,211,238,0.8))" }} />
           <polygon points="36,65 33.5,36 36,40 38.5,36" fill="#334155" />
@@ -152,11 +152,13 @@ function GForceDot({ gLat, gLon }: { gLat: number | null; gLon: number | null })
           <text y="43" textAnchor="middle" fill="#1e2d3d" fontSize="5" fontFamily="monospace">BRAKE</text>
           <text x="40" y="2" textAnchor="middle" fill="#1e2d3d" fontSize="5" fontFamily="monospace">R</text>
           <text x="-40" y="2" textAnchor="middle" fill="#1e2d3d" fontSize="5" fontFamily="monospace">L</text>
-          {/* Dot */}
-          {hasFix && (
-            <circle cx={dx} cy={dy} r="4" fill={dotColor}
-              style={{ filter: `drop-shadow(0 0 4px ${dotColor})` }} />
-          )}
+          {/* Dot — always rendered at origin, moved via CSS translate for animation */}
+          <circle cx="0" cy="0" r="4" fill={hasFix ? dotColor : "transparent"}
+            style={{
+              transform: `translate(${dx}px, ${dy}px)`,
+              transition: "transform 0.2s ease, fill 0.2s ease",
+              filter: hasFix ? `drop-shadow(0 0 4px ${dotColor})` : "none",
+            }} />
         </svg>
         <div className="font-mono text-xs" style={{ color: "#4a7a8a" }}>
           <div>LAT <span style={{ color: hasFix ? C : DIM }}>{hasFix ? fmt1(gLat) : "—"}<span style={{ color: LABEL }}>g</span></span></div>
@@ -175,7 +177,7 @@ function PedalBars({ throttle, brake }: { throttle: number | null; brake: number
         <span style={{ color: value !== null ? color : DIM }}>{value !== null ? `${Math.round(value)}%` : "—"}</span>
       </div>
       <div className="h-2 rounded-full" style={{ background: "#1a2535" }}>
-        <div className="h-2 rounded-full transition-all duration-100"
+        <div className="h-2 rounded-full transition-all duration-200"
           style={{ width: `${Math.min(value ?? 0, 100)}%`, background: color,
             boxShadow: (value ?? 0) > 5 ? `0 0 6px ${color}88` : "none" }} />
       </div>
@@ -207,7 +209,7 @@ function RPMBar({ rpm }: { rpm: number | null }) {
         </span>
       </div>
       <div className="h-1.5 rounded-full" style={{ background: "#1a2535" }}>
-        <div className="h-1.5 rounded-full transition-all duration-100"
+        <div className="h-1.5 rounded-full transition-all duration-200"
           style={{ width: `${pct}%`, background: barColor,
             boxShadow: inRedZone ? `0 0 6px #ef444488` : "none" }} />
       </div>
@@ -259,10 +261,12 @@ export default function VideoModal({
   const playerRef = useRef<Plyr | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryData>(initialTelemetry);
 
-  // Throttle telemetry updates to ~8 fps to keep React renders manageable
+  // Throttle telemetry updates to ~8 fps to keep React renders manageable.
+  // Store the handler in a ref so the Plyr useEffect never needs to re-run
+  // when track/onPositionUpdate change — avoids destroying/recreating the player.
   const lastUpdateRef = useRef(0);
-
-  const handleTimeUpdate = useCallback(() => {
+  const handleTimeUpdateRef = useRef<() => void>(() => {});
+  handleTimeUpdateRef.current = useCallback(() => {
     const player = playerRef.current;
     if (!player) return;
     const now = performance.now();
@@ -298,18 +302,19 @@ export default function VideoModal({
       player.currentTime = seekSeconds;
       hasSought = true;
     };
+    // Stable wrapper calls the ref — Plyr effect deps don't include the callback
+    const onTimeUpdate = () => handleTimeUpdateRef.current();
     player.on("ready", seekTo);
     player.on("loadedmetadata", () => { if (!hasSought) seekTo(); });
-    player.on("timeupdate", handleTimeUpdate);
+    player.on("timeupdate", onTimeUpdate);
 
     return () => {
       player.off("ready", seekTo);
-      player.off("loadedmetadata", seekTo);
-      player.off("timeupdate", handleTimeUpdate);
+      player.off("timeupdate", onTimeUpdate);
       player.destroy();
       playerRef.current = null;
     };
-  }, [src, seekSeconds, handleTimeUpdate]);
+  }, [src, seekSeconds]); // ← no handleTimeUpdate dep; ref keeps it fresh
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -327,12 +332,14 @@ export default function VideoModal({
   const lngDir = telemetry.lng != null ? (telemetry.lng < 0 ? "W" : "E") : null;
   const latDir = telemetry.lat != null ? (telemetry.lat >= 0 ? "N" : "S") : null;
 
+  // Mobile: full-screen scrollable overlay. Desktop: centered flex-row card.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center"
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto md:flex md:items-center md:justify-center"
       style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(3px)" }}
       onClick={onClose}>
       <div
-        className="relative flex flex-col md:flex-row w-full max-w-6xl mx-2 md:mx-4 rounded-xl overflow-hidden shadow-2xl max-h-screen md:max-h-[90vh]"
+        className="relative flex flex-col md:flex-row w-full md:max-w-6xl md:mx-4 md:rounded-xl md:overflow-hidden shadow-2xl md:max-h-[90vh]"
         style={{ border: "1px solid rgba(34,211,238,0.12)" }}
         onClick={(e) => e.stopPropagation()}>
 
@@ -347,9 +354,8 @@ export default function VideoModal({
         </div>
 
         {/* ── Telemetry panel ── */}
-        {/* tel-panel controls width: full on mobile, 256px sidebar on md+ */}
-        <style>{`.tel-panel { width: 100%; border-top: 1px solid rgba(34,211,238,0.1); overflow-y: auto; flex: 1 1 0; min-height: 0; } @media (min-width: 768px) { .tel-panel { width: 256px; flex: 0 0 auto; border-top: none; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }`}</style>
-        <div className="tel-panel font-mono" style={{ background: "#080c10" }}>
+        <style>{`@media (min-width: 768px) { .tel-panel { width: 256px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid rgba(34,211,238,0.1); max-height: 100%; } }`}</style>
+        <div className="tel-panel font-mono" style={{ background: "#080c10", borderTop: "1px solid rgba(34,211,238,0.1)" }}>
           <div className="flex flex-col gap-4 p-4">
 
             {/* Speed + Gear */}

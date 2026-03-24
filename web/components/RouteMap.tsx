@@ -210,6 +210,28 @@ export default function RouteMap() {
     };
   }, [onRouteClick]);
 
+  // Stable callbacks — must not change on tooltip hover re-renders or Plyr
+  // will destroy and recreate the player every time the map tooltip moves.
+  const onPositionUpdate = useCallback((lat: number, lng: number) => {
+    if (!mapRef.current) return;
+    if (!carMarkerRef.current) {
+      const el = document.createElement("div");
+      el.style.cssText =
+        "width:24px;height:24px;background:#e85d04;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px rgba(232,93,4,0.8);";
+      carMarkerRef.current = new maplibregl.Marker({ element: el })
+        .setLngLat([lng, lat])
+        .addTo(mapRef.current);
+    } else {
+      carMarkerRef.current.setLngLat([lng, lat]);
+    }
+  }, []);
+
+  const onModalClose = useCallback(() => {
+    carMarkerRef.current?.remove();
+    carMarkerRef.current = null;
+    setActiveClip(null);
+  }, []);
+
   const formattedTooltipTime = tooltip
     ? new Date(tooltip.utc).toLocaleString("en-US", {
         month: "short",
@@ -255,24 +277,8 @@ export default function RouteMap() {
           utcTime={activeClip.utcTime}
           telemetry={activeClip.telemetry}
           track={activeClip.track}
-          onPositionUpdate={(lat, lng) => {
-            if (!mapRef.current) return;
-            if (!carMarkerRef.current) {
-              const el = document.createElement("div");
-              el.style.cssText =
-                "width:24px;height:24px;background:#e85d04;border:2px solid #fff;border-radius:50%;box-shadow:0 0 8px rgba(232,93,4,0.8);";
-              carMarkerRef.current = new maplibregl.Marker({ element: el })
-                .setLngLat([lng, lat])
-                .addTo(mapRef.current);
-            } else {
-              carMarkerRef.current.setLngLat([lng, lat]);
-            }
-          }}
-          onClose={() => {
-            carMarkerRef.current?.remove();
-            carMarkerRef.current = null;
-            setActiveClip(null);
-          }}
+          onPositionUpdate={onPositionUpdate}
+          onClose={onModalClose}
         />
       )}
     </>
