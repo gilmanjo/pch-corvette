@@ -2,11 +2,22 @@
 
 import { useState } from "react";
 
-const C = "#22d3ee";
-const BORDER = "rgba(34,211,238,0.2)";
+// Warm cream — matches modal palette
+const C = "#c07808";
+const BTN_BG = "rgba(250,246,238,0.92)";
+const BTN_HOVER = "rgba(250,246,238,1)";
+const BORDER = "rgba(160,110,30,0.28)";
+const BORDER_HOVER = "rgba(160,110,30,0.55)";
+const TIP_BG = "rgba(250,246,238,0.97)";
+const TIP_TEXT = "#1c1408";
+const TIP_BORDER = "rgba(160,110,30,0.28)";
 
 interface ToolbarProps {
   onAboutClick: () => void;
+  onItineraryClick: () => void;
+  onLocationsClick: () => void;
+  onFiltersClick: () => void;
+  onStatsClick: () => void;
 }
 
 function ToolBtn({
@@ -28,12 +39,12 @@ function ToolBtn({
         aria-label={label}
         style={{
           width: 36, height: 36, borderRadius: 8, cursor: "pointer",
-          background: hovered ? "rgba(34,211,238,0.14)" : "rgba(8,12,16,0.82)",
-          border: `1px solid ${hovered ? "rgba(34,211,238,0.45)" : BORDER}`,
+          background: hovered ? BTN_HOVER : BTN_BG,
+          border: `1px solid ${hovered ? BORDER_HOVER : BORDER}`,
           color: C,
           display: "flex", alignItems: "center", justifyContent: "center",
           transition: "background 0.15s, border-color 0.15s",
-          backdropFilter: "blur(4px)",
+          backdropFilter: "blur(6px)",
         }}
       >
         {children}
@@ -41,13 +52,14 @@ function ToolBtn({
       {hovered && (
         <div
           style={{
-            position: "absolute", right: "calc(100% + 8px)", top: "50%",
+            position: "absolute", left: "calc(100% + 8px)", top: "50%",
             transform: "translateY(-50%)", whiteSpace: "nowrap",
-            background: "rgba(8,12,16,0.92)",
-            border: `1px solid ${BORDER}`,
-            color: C, fontSize: 11, fontFamily: "monospace",
+            background: TIP_BG,
+            border: `1px solid ${TIP_BORDER}`,
+            color: TIP_TEXT, fontSize: 11, fontFamily: "monospace",
             padding: "4px 10px", borderRadius: 4,
-            pointerEvents: "none", backdropFilter: "blur(4px)",
+            pointerEvents: "none",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
           }}
         >
           {label}
@@ -57,7 +69,6 @@ function ToolBtn({
   );
 }
 
-// SVG icons
 const IconAbout = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10" />
@@ -77,6 +88,13 @@ const IconItinerary = () => (
   </svg>
 );
 
+const IconLocations = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+    <circle cx="12" cy="10" r="3" />
+  </svg>
+);
+
 const IconFilters = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
@@ -91,24 +109,27 @@ const IconStats = () => (
   </svg>
 );
 
-export default function Toolbar({ onAboutClick }: ToolbarProps) {
+export default function Toolbar({ onAboutClick, onItineraryClick, onLocationsClick, onFiltersClick, onStatsClick }: ToolbarProps) {
   return (
     <div
       style={{
-        position: "fixed", top: 12, right: 52, zIndex: 30,
+        position: "fixed", top: 12, left: 12, zIndex: 30,
         display: "flex", flexDirection: "column", gap: 8,
       }}
     >
       <ToolBtn label="About PCH Corvette" onClick={onAboutClick}>
         <IconAbout />
       </ToolBtn>
-      <ToolBtn label="Itinerary" onClick={() => {}}>
+      <ToolBtn label="Itinerary" onClick={onItineraryClick}>
         <IconItinerary />
       </ToolBtn>
-      <ToolBtn label="Map Filters" onClick={() => {}}>
+      <ToolBtn label="Locations" onClick={onLocationsClick}>
+        <IconLocations />
+      </ToolBtn>
+      <ToolBtn label="Map Filters" onClick={onFiltersClick}>
         <IconFilters />
       </ToolBtn>
-      <ToolBtn label="Statistics" onClick={() => {}}>
+      <ToolBtn label="Statistics" onClick={onStatsClick}>
         <IconStats />
       </ToolBtn>
     </div>
