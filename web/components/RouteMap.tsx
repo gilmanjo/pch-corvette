@@ -6,6 +6,7 @@ import { loadClipIndex, type ClipIndex } from "@/lib/clipIndex";
 import { resolveClip, resolveNextClip, type ResolvedClip } from "@/lib/resolveClip";
 import VideoModal from "@/components/VideoModal";
 import { TRIP_LOCATIONS } from "@/lib/tripData";
+import { loadDslrPhotos, photoCountsByLocation } from "@/lib/photoData";
 
 const MAPTILER_KEY = process.env.NEXT_PUBLIC_MAPTILER_KEY ?? "";
 const STYLE_URL = `https://api.maptiler.com/maps/topo-v2/style.json?key=${MAPTILER_KEY}`;
@@ -53,6 +54,7 @@ export default function RouteMap({ flyToRef, onLocationDotClick }: RouteMapProps
   const carMarkerRef = useRef<maplibregl.Marker | null>(null);
   const activeClipRef = useRef<ResolvedClip | null>(null);
   const hoveredLocIdRef = useRef<string | null>(null);
+  const photoCountsRef = useRef<Map<string, number>>(new Map());
   const [resolving, setResolving] = useState(false);
   const [noClip, setNoClip] = useState(false);
   const [activeClip, setActiveClip] = useState<ResolvedClip | null>(null);
@@ -84,6 +86,13 @@ export default function RouteMap({ flyToRef, onLocationDotClick }: RouteMapProps
     },
     []
   );
+
+  // Load photo index once for tooltip counts
+  useEffect(() => {
+    loadDslrPhotos().then(photos => {
+      photoCountsRef.current = photoCountsByLocation(photos);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -372,7 +381,8 @@ export default function RouteMap({ flyToRef, onLocationDotClick }: RouteMapProps
       {locTooltip && (() => {
         const loc = TRIP_LOCATIONS.find(l => l.id === locTooltip.id);
         if (!loc) return null;
-        const hasMedia = loc.media.photos > 0 || loc.media.videos > 0 || loc.media.keepsakes > 0;
+        const photoCount = photoCountsRef.current.get(loc.id) ?? loc.media.photos;
+        const hasMedia = photoCount > 0 || loc.media.videos > 0 || loc.media.keepsakes > 0;
         return (
           <div
             className="fixed z-30 pointer-events-none px-3 py-2 rounded-lg text-xs font-mono shadow-lg"
@@ -387,7 +397,7 @@ export default function RouteMap({ flyToRef, onLocationDotClick }: RouteMapProps
             <div style={{ color: "#9a7e55", fontSize: 10, marginTop: 1 }}>{loc.region}</div>
             {hasMedia && (
               <div style={{ color: "#7a5a20", marginTop: 3, display: "flex", gap: 8 }}>
-                {loc.media.photos > 0 && <span>{loc.media.photos} photos</span>}
+                {photoCount > 0 && <span>{photoCount} photos</span>}
                 {loc.media.videos > 0 && <span>{loc.media.videos} videos</span>}
                 {loc.media.keepsakes > 0 && <span>{loc.media.keepsakes} keepsakes</span>}
               </div>
